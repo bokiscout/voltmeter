@@ -41,7 +41,12 @@
 #include "stm32f723e_discovery.h"
 #include "stm32f723e_discovery_lcd.h"
 #include "stm32f723e_discovery_ts.h"
+
 #include <math.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Definition for ADCx clock resources */
 #define ADCx                            ADC3
@@ -68,6 +73,9 @@
 /* Definition for ADCx's NVIC */
 #define ADCx_DMA_IRQn                   DMA2_Stream0_IRQn
 #define ADCx_DMA_IRQHandler             DMA2_Stream0_IRQHandler
+
+/* number of digits to be displayed on the LCD */
+#define DIGITS							5
 
 
 /** @addtogroup STM32F7xx_HAL_Examples
@@ -103,95 +111,24 @@ void display_welcome_message(void);
 void DMA_ADC_Config(void);
 void LEDS_Init(void);
 void LCD_Init(void);
-
-/* reverses a string 'str' of length 'len' */
-void reverse(char *str, int len);
-
-/* Converts a given integer x to string str[].  d is the number
- * of digits required in output. If d is more than the number
- * of digits in x, then 0s are added at the beginning. */
-int intToStr(int x, char str[], int d);
-
-/* Converts a floating point number to string. */
-void ftoa(float n, char *res, int afterpoint);
-
 float map(uint16_t volt);
+uint8_t volts_to_string (float volts, char* s);
 
 /* Private functions ---------------------------------------------------------*/
-//char * correct(uint16_t value){
-//
-//	float error = (value * value) *0.05 / 1000;
-//	char *res;
-//	sprintf(res,"%f", ((value-error) / 1000.0) -0.05);
-//	res = "123";
-//	return res;
-//}
-
-// reverses a string 'str' of length 'len'
-void reverse(char *str, int len) {
-	int i = 0, j = len - 1, temp;
-	while (i < j) {
-		temp = str[i];
-		str[i] = str[j];
-		str[j] = temp;
-		i++;
-		j--;
-	}
-}
-
-// Converts a given integer x to string str[].  d is the number
-// of digits required in output. If d is more than the number
-// of digits in x, then 0s are added at the beginning.
-int intToStr(int x, char str[], int d) {
-	int i = 0;
-	while (x) {
-		str[i++] = (x % 10) + '0';
-		x = x / 10;
-	}
-
-	// If number of digits required is more, then
-	// add 0s at the beginning
-	while (i < d)
-		str[i++] = '0';
-
-	reverse(str, i);
-	str[i] = '\0';
-	return i;
-}
-
-// Converts a floating point number to string.
-void ftoa(float n, char *res, int afterpoint) {
-	// Extract integer part
-	int ipart = (int) n;
-
-	// Extract floating part
-	float fpart = n - (float) ipart;
-
-	// convert integer part to string
-	int i = intToStr(ipart, res, 1);// tuma ima izmena od predhodniot kod 1 namesto 0
-
-	// check for display option after point
-	if (afterpoint != 0) {
-		res[i] = '.';  // add dot
-
-		// Get the value of fraction part upto given no.
-		// of points after dot. The third parameter is needed
-		// to handle cases like 233.007
-		fpart = fpart * pow(10, afterpoint);
-
-		intToStr((int) fpart, res + i + 1, afterpoint);
-	}
-}
-
 float map(uint16_t volt) {
-	float greska = 0, v;
-	v = volt / 1000.0;
-	greska = v * v * 0.04;
-	return (v - greska) - 0.06;
+	float greska = 0;
+	float result = 0;
+
+	greska = volt * volt * 0.05 / 1000.0;
+	result = (((volt - greska) / 1000.0) - 0.05);
+
+	return result;
 }
 
 void display_welcome_message() {
-	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t*) "Welcome :)",CENTER_MODE);
+	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t*) "Welcome",CENTER_MODE);
+	HAL_Delay(1000);
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
 }
 
 void LEDS_Init(){
@@ -259,11 +196,11 @@ void DMA_ADC_Config(){
 }
 
 // callback for ADC
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* AdcHandle)
-{
-  /* Get the converted value of regular channel */
-	uhADCxConvertedValue = HAL_ADC_GetValue(AdcHandle);
-}
+//void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* AdcHandle)
+//{
+//  /* Get the converted value of regular channel */
+//	//uhADCxConvertedValue = HAL_ADC_GetValue(AdcHandle);
+//}
 
 /**
  * @brief  System Clock Configuration
@@ -390,6 +327,40 @@ static void CPU_CACHE_Enable(void) {
 	SCB_EnableDCache();
 }
 
+uint8_t volts_to_string(float volts, char* s) {
+	uint8_t len = 0;
+	float volts_abs = (volts < 0) ? -volts : volts;
+
+	int volts_int_part = volts_abs;                  				// Get as integer (abs)
+	float volts_temp_fraction = volts_abs - volts_int_part; 		// Get fraction (0.01234).
+	int volts_fraction_part = trunc(volts_temp_fraction * 10000); 	// Turn into integer (1234)
+
+	do {
+		s[len++] = '0' + volts_int_part % 10;
+		volts_int_part /= 10;
+	} while (volts_int_part);
+
+	s[len] = '.';
+
+	if (volts_fraction_part >= 1000) {
+		s[++len] = '0' + volts_fraction_part / 1000;
+		s[++len] = '0' + (volts_fraction_part % 1000) / 100;
+	} else if ((volts_fraction_part >= 100) && (volts_fraction_part < 1000)) {
+		s[++len] = '0';
+		s[++len] = '0' + (volts_fraction_part % 1000) / 100;
+	} else if (volts_fraction_part < 100) {
+		s[++len] = '0';
+		s[++len] = '0';
+	}
+
+	// add measurement unit
+	s[++len] = ' ';
+	s[++len] = 'V';
+
+	s[++len] = 0;
+	return len;
+} // volts_to_string
+
 /**
  * @brief  Main program
  * @param  None
@@ -423,6 +394,8 @@ int main(void) {
 	LEDS_Init();
 	LCD_Init();
 	display_welcome_message();
+//	HAL_Delay(600);
+
 	DMA_ADC_Config();
 
 	/* Infinite loop */
@@ -430,9 +403,9 @@ int main(void) {
 		BSP_LED_Toggle(LED5);
 
 		volts = map(uhADCxConvertedValue);
-		ftoa(volts, buff,4);
+		volts_to_string(volts, buff);
 
-		BSP_LCD_Clear(LCD_COLOR_WHITE);
+//		BSP_LCD_Clear(LCD_COLOR_WHITE);
 		BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t *) buff, CENTER_MODE);
 
 		HAL_Delay(200);
