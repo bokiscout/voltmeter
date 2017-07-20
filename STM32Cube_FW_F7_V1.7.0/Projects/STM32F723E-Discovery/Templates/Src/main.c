@@ -77,6 +77,8 @@
 /* number of digits to be displayed on the LCD */
 #define DIGITS							5
 
+/* number of measurement to get average from */
+#define AVG_ON_PAST						5
 
 /** @addtogroup STM32F7xx_HAL_Examples
  * @{
@@ -100,7 +102,9 @@ ADC_HandleTypeDef AdcHandle;
 char buff[10];
 
 /* store corrected value for Input Voltage */
-float volts;
+float volts = 0;
+float volts_array[AVG_ON_PAST];
+int volts_array_position = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 static void SystemClock_Config(void);
@@ -113,20 +117,48 @@ void LEDS_Init(void);
 void LCD_Init(void);
 float map(uint16_t volt);
 uint8_t volts_to_string (float volts, char* s);
+float average(float *volts_array);
 
 /* Private functions ---------------------------------------------------------*/
 float map(uint16_t volt) {
-	float greska = 0;
+//	float greska = 0;
+//	float result = 0;
+//
+//	greska = volt * volt * 0.05 / 1000.0;
+//	result = (((volt - greska) / 1000.0) - 0.05);
+//
+//	return result;
+
+// thank you WolframAplha =)
+// but no thanks
+	return 0.0000111415 *(volt *volt) - (0.00524878 *volt) -1.98671;
+}
+
+float average(float *volts_array){
 	float result = 0;
+	int i;
 
-	greska = volt * volt * 0.05 / 1000.0;
-	result = (((volt - greska) / 1000.0) - 0.05);
+	for(i=0; i < AVG_ON_PAST; i++){
+		result += volts_array[i];
+	}
 
-	return result;
+//	float final = (float)result / (float)10.0f;
+//	result = result/AVG_ON_PAST;
+
+	return result / (float)AVG_ON_PAST;
 }
 
 void display_welcome_message() {
+	BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
+	BSP_LCD_FillRect(0, BSP_LCD_GetYSize() / 2 - 20, BSP_LCD_GetXSize(), 60);
+
+	BSP_LCD_SetBackColor(LCD_COLOR_BLUE);
+	BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
 	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t*) "Welcome",CENTER_MODE);
+
+	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
+
 	HAL_Delay(1000);
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
 }
@@ -178,7 +210,7 @@ void DMA_ADC_Config(){
 	/*##-2- Configure ADC regular channel ######################################*/
 	sConfig.Channel      = ADC_CHANNEL_8;
 	sConfig.Rank         = 1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
 	sConfig.Offset       = 0;
 
 	if (HAL_ADC_ConfigChannel(&AdcHandle, &sConfig) != HAL_OK)
@@ -335,10 +367,14 @@ uint8_t volts_to_string(float volts, char* s) {
 	float volts_temp_fraction = volts_abs - volts_int_part; 		// Get fraction (0.01234).
 	int volts_fraction_part = trunc(volts_temp_fraction * 10000); 	// Turn into integer (1234)
 
-	do {
-		s[len++] = '0' + volts_int_part % 10;
-		volts_int_part /= 10;
-	} while (volts_int_part);
+//	do {
+//		s[len++] = '0' + volts_int_part % 10;
+//		volts_int_part /= 10;
+//	} while (volts_int_part);
+	if(volts_int_part >= 10){
+		s[len++] = '0' + volts_int_part/10 % 10;
+	}
+	s[len++] = '0' + volts_int_part % 10;
 
 	s[len] = '.';
 
@@ -402,16 +438,23 @@ int main(void) {
 	while (1) {
 		BSP_LED_Toggle(LED5);
 
-		volts = map(uhADCxConvertedValue);
-		volts_to_string(volts, buff);
+		volts_array[volts_array_position] = map(uhADCxConvertedValue);
+		volts_array_position++;
 
-//		BSP_LCD_Clear(LCD_COLOR_WHITE);
+		if(volts_array_position == AVG_ON_PAST){
+			volts_array_position = 0;
+
+			volts = average(volts_array);
+			volts_to_string(volts, buff);
+
+			BSP_LCD_Clear(LCD_COLOR_WHITE);
+		}
+
 		BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t *) buff, CENTER_MODE);
 
-		HAL_Delay(200);
+		HAL_Delay(100);
 	}
 }
-
 
 
 #ifdef  USE_FULL_ASSERT
