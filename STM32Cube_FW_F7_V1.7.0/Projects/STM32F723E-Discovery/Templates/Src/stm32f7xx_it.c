@@ -40,6 +40,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f7xx_it.h"
 #include "main.h"
+#include "stm32f723e_discovery.h"
+
 
 /** @addtogroup STM32F7xx_HAL_Examples
   * @{
@@ -174,6 +176,12 @@ void ADCx_DMA_IRQHandler(void)
 {
   HAL_DMA_IRQHandler(AdcHandle.DMA_Handle);
 }
+
+//// probably touch screen
+//void EXTI9_5_IRQHandler(void)
+//{
+//   HAL_GPIO_EXTI_IRQHandler(TS_INT_PIN);
+//}
 
 /******************************************************************************/
 /*                 STM32F7xx Peripherals Interrupt Handlers                   */

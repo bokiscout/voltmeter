@@ -42,12 +42,6 @@
 #include "stm32f723e_discovery_lcd.h"
 #include "stm32f723e_discovery_ts.h"
 
-#include <math.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 /* Definition for ADCx clock resources */
 #define ADCx                            ADC3
 #define ADCx_CLK_ENABLE()               __HAL_RCC_ADC3_CLK_ENABLE()
@@ -80,6 +74,11 @@
 /* number of measurement to get average from */
 #define AVG_ON_PAST						5
 
+static int16_t aPhysX[2], aPhysY[2], aLogX[2], aLogY[2];
+
+/* Global variables ---------------------------------------------------------*/
+TS_StateTypeDef TS_State = { 0 };
+
 /** @addtogroup STM32F7xx_HAL_Examples
  * @{
  */
@@ -103,6 +102,7 @@ char buff[10];
 
 /* store corrected value for Input Voltage */
 float volts = 0;
+float volts_previous = 0;
 float volts_array[AVG_ON_PAST];
 int volts_array_position = 0;
 
@@ -116,10 +116,18 @@ void DMA_ADC_Config(void);
 void LEDS_Init(void);
 void LCD_Init(void);
 float map(uint16_t volt);
-uint8_t volts_to_string (float volts, char* s);
+uint8_t volts_to_string(float volts, char* s);
 float average(float *volts_array);
+void TS_Init(void);
+
+uint8_t Touchscreen_Calibration(void);
+uint8_t CheckForUserInput(void);
 
 /* Private functions ---------------------------------------------------------*/
+void TS_Init(){
+	BSP_TS_Init(BSP_LCD_GetXSize(), BSP_LCD_GetYSize());
+}
+
 float map(uint16_t volt) {
 //	float greska = 0;
 //	float result = 0;
@@ -131,21 +139,25 @@ float map(uint16_t volt) {
 
 // thank you WolframAplha =)
 // but no thanks
-	return 0.0000111415 *(volt *volt) - (0.00524878 *volt) -1.98671;
+	return 0.0000111415 * (volt * volt) - (0.00524878 * volt) - 1.98671;
 }
 
-float average(float *volts_array){
+float average(float *volts_array) {
 	float result = 0;
+	float total_weights = 0;
+	float current_weight = 0;
 	int i;
 
-	for(i=0; i < AVG_ON_PAST; i++){
-		result += volts_array[i];
+	for (i = 0; i < AVG_ON_PAST; i++) {
+		current_weight = (AVG_ON_PAST - (AVG_ON_PAST - i ) + 1) / 10.0;
+		result += volts_array[i] * current_weight;
+
+		total_weights += current_weight;
 	}
 
-//	float final = (float)result / (float)10.0f;
-//	result = result/AVG_ON_PAST;
+	result /= total_weights;
 
-	return result / (float)AVG_ON_PAST;
+	return result;
 }
 
 void display_welcome_message() {
@@ -154,7 +166,8 @@ void display_welcome_message() {
 
 	BSP_LCD_SetBackColor(LCD_COLOR_BLUE);
 	BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
-	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t*) "Welcome",CENTER_MODE);
+	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t*) "Welcome",
+			CENTER_MODE);
 
 	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
 	BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
@@ -163,7 +176,7 @@ void display_welcome_message() {
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
 }
 
-void LEDS_Init(){
+void LEDS_Init() {
 	BSP_LED_Init(LED5);
 	BSP_LED_Init(LED6);
 
@@ -179,7 +192,7 @@ void LCD_Init() {
 	BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
 }
 
-void DMA_ADC_Config(){
+void DMA_ADC_Config() {
 	ADC_ChannelConfTypeDef sConfig;
 
 	AdcHandle.Instance = ADCx;
@@ -188,40 +201,38 @@ void DMA_ADC_Config(){
 //		Error_Handler();
 //	}
 
-	AdcHandle.Init.ClockPrescaler        = ADC_CLOCKPRESCALER_PCLK_DIV4;
-	AdcHandle.Init.Resolution            = ADC_RESOLUTION_12B;
-	AdcHandle.Init.ScanConvMode          = DISABLE;                       /* Sequencer disabled (ADC conversion on only 1 channel: channel set on rank 1) */
-	AdcHandle.Init.ContinuousConvMode    = ENABLE;                        /* Continuous mode disabled to have only 1 conversion at each conversion trig */
-	AdcHandle.Init.DiscontinuousConvMode = DISABLE;                       /* Parameter discarded because sequencer is disabled */
-	AdcHandle.Init.NbrOfDiscConversion   = 0;
-	AdcHandle.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;        /* Conversion start trigged at each external event */
-	AdcHandle.Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
-	AdcHandle.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-	AdcHandle.Init.NbrOfConversion       = 1;
+	AdcHandle.Init.ClockPrescaler = ADC_CLOCKPRESCALER_PCLK_DIV4;
+	AdcHandle.Init.Resolution = ADC_RESOLUTION_12B;
+	AdcHandle.Init.ScanConvMode = DISABLE; /* Sequencer disabled (ADC conversion on only 1 channel: channel set on rank 1) */
+	AdcHandle.Init.ContinuousConvMode = ENABLE; /* Continuous mode disabled to have only 1 conversion at each conversion trig */
+	AdcHandle.Init.DiscontinuousConvMode = DISABLE; /* Parameter discarded because sequencer is disabled */
+	AdcHandle.Init.NbrOfDiscConversion = 0;
+	AdcHandle.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE; /* Conversion start trigged at each external event */
+	AdcHandle.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T1_CC1;
+	AdcHandle.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+	AdcHandle.Init.NbrOfConversion = 1;
 	AdcHandle.Init.DMAContinuousRequests = ENABLE;
-	AdcHandle.Init.EOCSelection          = DISABLE;
+	AdcHandle.Init.EOCSelection = DISABLE;
 
-	if (HAL_ADC_Init(&AdcHandle) != HAL_OK)
-	{
+	if (HAL_ADC_Init(&AdcHandle) != HAL_OK) {
 		/* ADC initialization Error */
 		Error_Handler();
 	}
 
 	/*##-2- Configure ADC regular channel ######################################*/
-	sConfig.Channel      = ADC_CHANNEL_8;
-	sConfig.Rank         = 1;
+	sConfig.Channel = ADC_CHANNEL_8;
+	sConfig.Rank = 1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
-	sConfig.Offset       = 0;
+	sConfig.Offset = 0;
 
-	if (HAL_ADC_ConfigChannel(&AdcHandle, &sConfig) != HAL_OK)
-	{
+	if (HAL_ADC_ConfigChannel(&AdcHandle, &sConfig) != HAL_OK) {
 		/* Channel Configuration Error */
 		Error_Handler();
 	}
 
 	/*##-3- Start the conversion process #######################################*/
-	if(HAL_ADC_Start_DMA(&AdcHandle, (uint32_t*)&uhADCxConvertedValue, 1) != HAL_OK)
-	{
+	if (HAL_ADC_Start_DMA(&AdcHandle, (uint32_t*) &uhADCxConvertedValue, 1)
+			!= HAL_OK) {
 		/* Start Conversation Error */
 		Error_Handler();
 	}
@@ -363,16 +374,16 @@ uint8_t volts_to_string(float volts, char* s) {
 	uint8_t len = 0;
 	float volts_abs = (volts < 0) ? -volts : volts;
 
-	int volts_int_part = volts_abs;                  				// Get as integer (abs)
-	float volts_temp_fraction = volts_abs - volts_int_part; 		// Get fraction (0.01234).
-	int volts_fraction_part = trunc(volts_temp_fraction * 10000); 	// Turn into integer (1234)
+	int volts_int_part = volts_abs;                  	// Get as integer (abs)
+	float volts_temp_fraction = volts_abs - volts_int_part; // Get fraction (0.01234).
+	int volts_fraction_part = trunc(volts_temp_fraction * 10000); // Turn into integer (1234)
 
 //	do {
 //		s[len++] = '0' + volts_int_part % 10;
 //		volts_int_part /= 10;
 //	} while (volts_int_part);
-	if(volts_int_part >= 10){
-		s[len++] = '0' + volts_int_part/10 % 10;
+	if (volts_int_part >= 10) {
+		s[len++] = '0' + volts_int_part / 10 % 10;
 	}
 	s[len++] = '0' + volts_int_part % 10;
 
@@ -397,6 +408,40 @@ uint8_t volts_to_string(float volts, char* s) {
 	return len;
 } // volts_to_string
 
+/*  Magic */
+uint8_t Touchscreen_Calibration(void) {
+	uint8_t ts_status = TS_OK;
+	uint8_t i;
+
+	/* Get touch points for SW calibration processing */
+	aLogX[0] = 20;
+	aLogY[0] = 20;
+	aLogX[1] = BSP_LCD_GetXSize() - 20;
+	aLogY[1] = BSP_LCD_GetYSize() - 20;
+
+	for (i = 0; i < 2; i++) {
+		TouchScreen_Calibration_GetPhysValues(aLogX[i], aLogY[i], &aPhysX[i],
+				&aPhysY[i]);
+	}
+
+	return (ts_status);
+}
+
+/**
+ * @brief  Check for user input.
+ * @param  None
+ * @retval Input state (1 : active / 0 : Inactive)
+ */
+uint8_t CheckForUserInput(void) {
+	if (BSP_PB_GetState(BUTTON_WAKEUP) != RESET) {
+		HAL_Delay(10);
+		while (BSP_PB_GetState(BUTTON_WAKEUP) != RESET)
+			;
+		return 1;
+	}
+	return 0;
+}
+
 /**
  * @brief  Main program
  * @param  None
@@ -408,7 +453,6 @@ int main(void) {
 	 These functions are provided as template implementation that User may integrate
 	 in his application, to enhance the performance in case of use of AXI interface
 	 with several masters. */
-
 
 	/* Configure the MPU attributes as Write Through */
 	MPU_Config();
@@ -429,33 +473,49 @@ int main(void) {
 
 	LEDS_Init();
 	LCD_Init();
+	TS_Init();
 	display_welcome_message();
 //	HAL_Delay(600);
 
 	DMA_ADC_Config();
 
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	BSP_LCD_SetFont(&Font24);
+	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+
 	/* Infinite loop */
 	while (1) {
 		BSP_LED_Toggle(LED5);
 
+		BSP_TS_GetState(&TS_State);
+		if (TS_State.touchDetected) {
+			BSP_LED_Toggle(LED6);
+			HAL_Delay(250);
+			BSP_LED_Toggle(LED6);
+		}
+
 		volts_array[volts_array_position] = map(uhADCxConvertedValue);
 		volts_array_position++;
 
-		if(volts_array_position == AVG_ON_PAST){
+		if (volts_array_position == AVG_ON_PAST) {
 			volts_array_position = 0;
+
+			volts_previous = volts;
 
 			volts = average(volts_array);
 			volts_to_string(volts, buff);
 
-			BSP_LCD_Clear(LCD_COLOR_WHITE);
+			if (volts_previous >= 10 && volts < 10) {
+				BSP_LCD_Clear(LCD_COLOR_WHITE);
+			}
 		}
 
-		BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t *) buff, CENTER_MODE);
-
+		BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t *) buff,CENTER_MODE);
 		HAL_Delay(100);
 	}
 }
-
 
 #ifdef  USE_FULL_ASSERT
 
@@ -477,6 +537,5 @@ void assert_failed(uint8_t* file, uint32_t line)
 	}
 }
 #endif
-
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
