@@ -38,9 +38,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f7xx_hal.h"
+#include "stm32f7xx.h"
 #include "stm32f723e_discovery.h"
 #include "stm32f723e_discovery_lcd.h"
 #include "stm32f723e_discovery_ts.h"
+
+/* find main or amx */
+#define new_max(x,y) ((x) >= (y)) ? (x) : (y)
+#define new_min(x,y) ((x) <= (y)) ? (x) : (y)
 
 /* Definition for ADCx clock resources */
 #define ADCx                            ADC3
@@ -69,12 +74,15 @@
 #define ADCx_DMA_IRQHandler             DMA2_Stream0_IRQHandler
 
 /* number of digits to be displayed on the LCD */
-#define DIGITS							5
+#define DIGITS 5
 
 /* number of measurement to get average from */
-#define AVG_ON_PAST						5
+#define AVG_ON_PAST 5
 
 static int16_t aPhysX[2], aPhysY[2], aLogX[2], aLogY[2];
+
+/* Temperature variable */
+float temp;
 
 /* Global variables ---------------------------------------------------------*/
 TS_StateTypeDef TS_State = { 0 };
@@ -97,6 +105,8 @@ __IO uint16_t uhADCxConvertedValue = 0;
 /* ADC handler declaration */
 ADC_HandleTypeDef AdcHandle;
 
+GPIO_InitTypeDef GPIO_InitStruct;
+
 /* buffer used while converting the integer to string for displaying filtered Input Voltage */
 char buff[10];
 
@@ -105,6 +115,10 @@ float volts = 0;
 float volts_previous = 0;
 float volts_array[AVG_ON_PAST];
 int volts_array_position = 0;
+
+float *graph;
+int graph_display_offset = 220;
+int graph_y_axis_offset = 10;
 
 /* Private function prototypes -----------------------------------------------*/
 static void SystemClock_Config(void);
@@ -120,22 +134,24 @@ uint8_t volts_to_string(float volts, char* s);
 float average(float *volts_array);
 void TS_Init(void);
 
+int temperature = 0;
+
 uint8_t Touchscreen_Calibration(void);
 uint8_t CheckForUserInput(void);
 
 /* Private functions ---------------------------------------------------------*/
-void TS_Init(){
+void TS_Init() {
 	BSP_TS_Init(BSP_LCD_GetXSize(), BSP_LCD_GetYSize());
 }
 
 float map(uint16_t volt) {
-//	float greska = 0;
-//	float result = 0;
+// float greska = 0;
+// float result = 0;
 //
-//	greska = volt * volt * 0.05 / 1000.0;
-//	result = (((volt - greska) / 1000.0) - 0.05);
+// greska = volt * volt * 0.05 / 1000.0;
+// result = (((volt - greska) / 1000.0) - 0.05);
 //
-//	return result;
+// return result;
 
 // thank you WolframAplha =)
 // but no thanks
@@ -149,7 +165,7 @@ float average(float *volts_array) {
 	int i;
 
 	for (i = 0; i < AVG_ON_PAST; i++) {
-		current_weight = (AVG_ON_PAST - (AVG_ON_PAST - i ) + 1) / 10.0;
+		current_weight = (AVG_ON_PAST - (AVG_ON_PAST - i) + 1) / 10.0;
 		result += volts_array[i] * current_weight;
 
 		total_weights += current_weight;
@@ -197,9 +213,9 @@ void DMA_ADC_Config() {
 
 	AdcHandle.Instance = ADCx;
 
-//	if(HAL_ADC_DeInit(&AdcHandle) != HAL_OK){
-//		Error_Handler();
-//	}
+// if(HAL_ADC_DeInit(&AdcHandle) != HAL_OK){
+// Error_Handler();
+// }
 
 	AdcHandle.Init.ClockPrescaler = ADC_CLOCKPRESCALER_PCLK_DIV4;
 	AdcHandle.Init.Resolution = ADC_RESOLUTION_12B;
@@ -242,7 +258,7 @@ void DMA_ADC_Config() {
 //void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* AdcHandle)
 //{
 //  /* Get the converted value of regular channel */
-//	//uhADCxConvertedValue = HAL_ADC_GetValue(AdcHandle);
+// //uhADCxConvertedValue = HAL_ADC_GetValue(AdcHandle);
 //}
 
 /**
@@ -272,7 +288,7 @@ static void SystemClock_Config(void) {
 	/* Enable HSE Oscillator and activate PLL with HSE as source */
 	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
 	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-	//RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
+//RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
 	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
 	RCC_OscInitStruct.PLL.PLLM = 25;
@@ -327,15 +343,15 @@ static void MPU_Config(void) {
 	/* Configure the MPU attributes as WT for SRAM */
 	MPU_InitStruct.Enable = MPU_REGION_ENABLE;
 
-	//  MPU_InitStruct.BaseAddress = 0x20010000;
+//  MPU_InitStruct.BaseAddress = 0x20010000;
 	MPU_InitStruct.BaseAddress = 0x64000000;
 
-	//MPU_InitStruct.Size = MPU_REGION_SIZE_256KB;
+//MPU_InitStruct.Size = MPU_REGION_SIZE_256KB;
 	MPU_InitStruct.Size = MPU_REGION_SIZE_512KB;
 
 	MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
 
-	//  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+//  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
 	MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
 
 	MPU_InitStruct.IsCacheable = MPU_ACCESS_CACHEABLE;
@@ -347,11 +363,11 @@ static void MPU_Config(void) {
 
 	HAL_MPU_ConfigRegion(&MPU_InitStruct);
 
-	// added by me start here:
+// added by me start here:
 	MPU_InitStruct.BaseAddress = 0x6000000;
 	MPU_InitStruct.Number = MPU_REGION_NUMBER1;
 	HAL_MPU_ConfigRegion(&MPU_InitStruct);
-	// added by me end here:
+// added by me end here:
 
 	/* Enable the MPU */
 	HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
@@ -374,14 +390,15 @@ uint8_t volts_to_string(float volts, char* s) {
 	uint8_t len = 0;
 	float volts_abs = (volts < 0) ? -volts : volts;
 
-	int volts_int_part = volts_abs;                  	// Get as integer (abs)
+	int volts_int_part = volts_abs;
+// Get as integer (abs)
 	float volts_temp_fraction = volts_abs - volts_int_part; // Get fraction (0.01234).
 	int volts_fraction_part = trunc(volts_temp_fraction * 10000); // Turn into integer (1234)
 
-//	do {
-//		s[len++] = '0' + volts_int_part % 10;
-//		volts_int_part /= 10;
-//	} while (volts_int_part);
+// do {
+// s[len++] = '0' + volts_int_part % 10;
+// volts_int_part /= 10;
+// } while (volts_int_part);
 	if (volts_int_part >= 10) {
 		s[len++] = '0' + volts_int_part / 10 % 10;
 	}
@@ -400,7 +417,7 @@ uint8_t volts_to_string(float volts, char* s) {
 		s[++len] = '0';
 	}
 
-	// add measurement unit
+// add measurement unit
 	s[++len] = ' ';
 	s[++len] = 'V';
 
@@ -442,6 +459,152 @@ uint8_t CheckForUserInput(void) {
 	return 0;
 }
 
+void graph_Init() {
+	graph = (float*) malloc(sizeof(float) * BSP_LCD_GetXSize());
+
+	int i;
+	for (i = 0; i < BSP_LCD_GetXSize(); i++) {
+		graph[i] = 0;
+	}
+}
+
+void shift_graph_values() {
+	int i;
+
+	for (i = BSP_LCD_GetXSize(); i >= 1; i--) {
+		graph[i] = graph[i - 1];
+	}
+}
+int a = 0;
+
+void draw_graph() {
+	BSP_LCD_SetTextColor(LCD_COLOR_RED);
+
+////	BSP_LCD_Clear(LCD_COLOR_WHITE);
+//	a = BSP_LCD_GetYSize();
+//	BSP_LCD_ClearStringLine(0);
+//	BSP_LCD_ClearStringLine(1);
+//	BSP_LCD_ClearStringLine(2);
+//	BSP_LCD_ClearStringLine(3);
+//	BSP_LCD_ClearStringLine(4);
+////	BSP_LCD_ClearStringLine(5);
+//	BSP_LCD_ClearStringLine(6);
+//	BSP_LCD_ClearStringLine(7);
+//	BSP_LCD_ClearStringLine(8);
+//	BSP_LCD_ClearStringLine(9);
+//	BSP_LCD_ClearStringLine(10);
+//	BSP_LCD_ClearStringLine(11);
+////	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize());
+
+	int i;
+	for (i = 0; i < BSP_LCD_GetXSize(); i++) {
+
+//		int x_1 = i+10;
+//		int y_1 = BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset;
+//
+//		int x_2 = i+1 +10;
+//		int y_2 = BSP_LCD_GetYSize() - graph[i+1] * 10 + graph_display_offset;
+//
+//		BSP_LCD_DrawLine(x_1, y_1, x_2 +1, y_2);
+
+		BSP_LCD_DrawLine(i +10, BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset,i + 1 +10,BSP_LCD_GetYSize() - graph[i + 1] * 10 + graph_display_offset);
+		BSP_LCD_DrawLine(i +10, BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset +1, i + 1 +10, BSP_LCD_GetYSize() - graph[i + 1] * 10 + graph_display_offset +1);
+	}
+
+	BSP_LCD_SetFont(&Font12);
+	BSP_LCD_SetTextColor(LCD_COLOR_DARKGRAY);
+
+	BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() + graph_display_offset, BSP_LCD_GetXSize());
+	BSP_LCD_DrawVLine(graph_y_axis_offset, 100, 120);
+
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -96, (uint8_t *) "9", LEFT_MODE);
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -75, (uint8_t *) "7", LEFT_MODE);
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -54, (uint8_t *) "5", LEFT_MODE);
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -35, (uint8_t *) "3", LEFT_MODE);
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -16, (uint8_t *) "1", LEFT_MODE);
+	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -4, (uint8_t *) "0", LEFT_MODE);
+}
+
+
+void display_volts() {
+	BSP_LCD_SetFont(&Font24);
+	BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
+
+//	BSP_LCD_ClearStringLine(4);
+//	BSP_LCD_ClearStringLine(5);
+//	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize());
+
+//	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize() - 130);
+	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 200, (uint8_t *) buff,CENTER_MODE);
+}
+
+// temp sensor start here
+#define HIGH 1
+#define LOW 0
+
+void init_gpio_D1() { //init D1 for input
+
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Pin = GPIO_PIN_1;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+}
+
+uint8_t dat[5];
+
+uint8_t read_data() {
+	uint8_t data = 0;
+	uint8_t DHpin = LOW;
+	DHpin = HAL_GPIO_ReadPin(GPIOD, 1);
+	for (int i = 0; i < 8; i++) {
+		if (DHpin == LOW) { ///pin= 0
+			while (DHpin == LOW)
+				; // wait for 50us
+			HAL_Delay(30); // determine the duration of the high level to determine the data is '0 'or '1'
+			if (DHpin == HIGH) /// pin =1
+				data |= (1 << (7 - i)); // high front and low in the post
+			while (DHpin == HIGH)
+				; // data '1 ', wait for the next one receiver
+		}
+	}
+	return data;
+}
+
+void KY015(uint8_t dat[]) {
+	for (int i = 0; i < 4; i++){ // receive temperature and humidity data, the parity bit is not considered
+		dat[i] = read_data(); //dat[0].dat[1] =>humidity dat[2].dat[3] =>temperature
+	}
+}
+
+int map_temperature(uint16_t input){
+	double temp = log(10000.0 * ((1024.0/input -1)));
+	temp = 1 / (0.001129148 + (0.000234125 + (0.0000000876741 * temp * temp)) * temp);
+	temp = temp - 273 * 15;
+	temp -= 20;
+
+	return (int) temp;
+}
+
+void display_temp(){
+	BSP_LCD_SetFont(&Font20);
+	BSP_LCD_SetTextColor(LCD_COLOR_DARKMAGENTA);
+
+	char temp[16];
+
+//	itoa(map_temperature(uhADCxConvertedValue), temp, 16);
+
+	float mapped = map_temperature(uhADCxConvertedValue);
+	volts_to_string(mapped, temp);
+
+
+	BSP_LCD_DisplayStringAt(0,0, (uint8_t *) temp, LEFT_MODE);
+
+//	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -54, (uint8_t *) "5", LEFT_MODE);
+}
+
+// temp sensor end here
+
 /**
  * @brief  Main program
  * @param  None
@@ -475,7 +638,9 @@ int main(void) {
 	LCD_Init();
 	TS_Init();
 	display_welcome_message();
-//	HAL_Delay(600);
+// HAL_Delay(600);
+
+	graph_Init();
 
 	DMA_ADC_Config();
 
@@ -507,12 +672,25 @@ int main(void) {
 			volts = average(volts_array);
 			volts_to_string(volts, buff);
 
-			if (volts_previous >= 10 && volts < 10) {
-				BSP_LCD_Clear(LCD_COLOR_WHITE);
-			}
+			shift_graph_values();
+			graph[0] = volts;
+
+			BSP_LCD_Clear(LCD_COLOR_WHITE);
+
+//			int i;
+//			for(i=0; i<BSP_LCD_GetXSize(); i += 10){
+//				BSP_LCD_ClearStringLine(i);
+//			}
+
+			display_volts();
+			draw_graph();
+			display_temp();
+
+//			if (volts_previous >= 10 && volts < 10) {
+//				BSP_LCD_Clear(LCD_COLOR_WHITE);
+//			}
 		}
 
-		BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 120, (uint8_t *) buff,CENTER_MODE);
 		HAL_Delay(100);
 	}
 }
