@@ -3,11 +3,11 @@
   * @file    stm32f7xx_hal_msp.c
   * @author  MCD Application Team
   * @version V1.0.0
-  * @date    30-December-2016 
+  * @date    30-December-2016
   * @brief   HAL MSP module.
-  *          This file template is located in the HAL folder and should be copied 
+  *          This file template is located in the HAL folder and should be copied
   *          to the user folder.
-  *         
+  *
   @verbatim
  ===============================================================================
                      ##### How to use this driver #####
@@ -44,7 +44,7 @@
   * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   *
   ******************************************************************************
-  */ 
+  */
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f7xx_hal.h"
@@ -75,6 +75,31 @@
 #define ADCx_DMA_IRQn                   DMA2_Stream0_IRQn
 #define ADCx_DMA_IRQHandler             DMA2_Stream0_IRQHandler
 
+//
+#define USARTx                           USART2
+#define USARTx_CLK_ENABLE()              __USART2_CLK_ENABLE()
+#define USARTx_RX_GPIO_CLK_ENABLE()      __GPIOC_CLK_ENABLE()
+#define USARTx_TX_GPIO_CLK_ENABLE()      __GPIOC_CLK_ENABLE()
+
+#define USARTx_FORCE_RESET()             __HAL_RCC_USART2_FORCE_RESET()
+#define USARTx_RELEASE_RESET()           __HAL_RCC_USART2_RELEASE_RESET()
+
+/* Definition for USARTx Pins */
+#define USARTx_TX_PIN                    GPIO_PIN_2
+#define USARTx_TX_GPIO_PORT              GPIOA
+#define USARTx_TX_AF                     GPIO_AF7_USART2
+#define USARTx_RX_PIN                    GPIO_PIN_3
+#define USARTx_RX_GPIO_PORT              GPIOA
+#define USARTx_RX_AF                     GPIO_AF7_USART2
+
+/* Size of Trasmission buffer */
+#define TXBUFFERSIZE                      (COUNTOF(aTxBuffer) - 1)
+/* Size of Reception buffer */
+#define RXBUFFERSIZE                      TXBUFFERSIZE
+
+/* Exported macro ------------------------------------------------------------*/
+#define COUNTOF(__BUFFER__)   (sizeof(__BUFFER__) / sizeof(*(__BUFFER__)))
+/* Exported functions ------------------------------------------------------- */
 /** @addtogroup STM32F7xx_HAL_Driver
   * @{
   */
@@ -191,6 +216,52 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef *hadc)
   /*##-2- Disable peripherals and GPIO Clocks ################################*/
   /* De-initialize the ADC Channel GPIO pin */
   HAL_GPIO_DeInit(ADCx_CHANNEL_GPIO_PORT, ADCx_CHANNEL_PIN);
+}
+
+//
+//
+//
+void HAL_UART_MspInit(UART_HandleTypeDef *huart)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  /*##-1- Enable peripherals and GPIO Clocks #################################*/
+  /* Enable GPIO TX/RX clock */
+  USARTx_TX_GPIO_CLK_ENABLE();
+  USARTx_RX_GPIO_CLK_ENABLE();
+
+
+  /* Enable USARTx clock */
+  USARTx_CLK_ENABLE();
+
+  /*##-2- Configure peripheral GPIO ##########################################*/
+  /* UART TX GPIO pin configuration  */
+  GPIO_InitStruct.Pin       = USARTx_TX_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_HIGH;
+  GPIO_InitStruct.Alternate = USARTx_TX_AF;
+
+  HAL_GPIO_Init(USARTx_TX_GPIO_PORT, &GPIO_InitStruct);
+
+  /* UART RX GPIO pin configuration  */
+  GPIO_InitStruct.Pin = USARTx_RX_PIN;
+  GPIO_InitStruct.Alternate = USARTx_RX_AF;
+
+  HAL_GPIO_Init(USARTx_RX_GPIO_PORT, &GPIO_InitStruct);
+}
+
+void HAL_UART_MspDeInit(UART_HandleTypeDef *huart)
+{
+  /*##-1- Reset peripherals ##################################################*/
+  USARTx_FORCE_RESET();
+  USARTx_RELEASE_RESET();
+
+  /*##-2- Disable peripherals and GPIO Clocks #################################*/
+  /* Configure USART2 Tx as alternate function  */
+  HAL_GPIO_DeInit(USARTx_TX_GPIO_PORT, USARTx_TX_PIN);
+  /* Configure USART2 Rx as alternate function  */
+  HAL_GPIO_DeInit(USARTx_RX_GPIO_PORT, USARTx_RX_PIN);
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

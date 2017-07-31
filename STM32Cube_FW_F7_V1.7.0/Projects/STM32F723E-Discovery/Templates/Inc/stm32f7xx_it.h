@@ -1,9 +1,9 @@
 /**
   ******************************************************************************
-  * @file    Templates/stm32f7xx_it.h 
+  * @file    Templates/stm32f7xx_it.h
   * @author  MCD Application Team
   * @version V1.0.0
-  * @date    30-December-2016 
+  * @date    30-December-2016
   * @brief   This file contains the headers of the interrupt handlers.
   ******************************************************************************
   * @attention
@@ -59,6 +59,7 @@
  void PendSV_Handler(void);
  void SysTick_Handler(void);
  void ADCx_DMA_IRQHandler(void);
+ void EXTI0_IRQHandler(void);
 
 #ifdef __cplusplus
 }

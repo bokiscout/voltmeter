@@ -38,14 +38,35 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f7xx_hal.h"
-#include "stm32f7xx.h"
 #include "stm32f723e_discovery.h"
 #include "stm32f723e_discovery_lcd.h"
 #include "stm32f723e_discovery_ts.h"
 
-/* find main or amx */
-#define new_max(x,y) ((x) >= (y)) ? (x) : (y)
-#define new_min(x,y) ((x) <= (y)) ? (x) : (y)
+/* Definition for USARTx clock resources */
+#define USARTx                           USART2
+#define USARTx_CLK_ENABLE()              __USART2_CLK_ENABLE()
+#define USARTx_RX_GPIO_CLK_ENABLE()      __GPIOC_CLK_ENABLE()
+#define USARTx_TX_GPIO_CLK_ENABLE()      __GPIOC_CLK_ENABLE()
+
+#define USARTx_FORCE_RESET()             __HAL_RCC_USART2_FORCE_RESET()
+#define USARTx_RELEASE_RESET()           __HAL_RCC_USART2_RELEASE_RESET()
+
+/* Definition for USARTx Pins */
+#define USARTx_TX_PIN                    GPIO_PIN_2
+#define USARTx_TX_GPIO_PORT              GPIOA
+#define USARTx_TX_AF                     GPIO_AF7_USART2
+#define USARTx_RX_PIN                    GPIO_PIN_3
+#define USARTx_RX_GPIO_PORT              GPIOA
+#define USARTx_RX_AF                     GPIO_AF7_USART2
+
+/* Size of Trasmission buffer */
+#define TXBUFFERSIZE                      (COUNTOF(aTxBuffer) - 1)
+/* Size of Reception buffer */
+#define RXBUFFERSIZE                      TXBUFFERSIZE
+
+/* Exported macro ------------------------------------------------------------*/
+#define COUNTOF(__BUFFER__)   (sizeof(__BUFFER__) / sizeof(*(__BUFFER__)))
+/* Exported functions ------------------------------------------------------- */
 
 /* Definition for ADCx clock resources */
 #define ADCx                            ADC3
@@ -81,9 +102,6 @@
 
 static int16_t aPhysX[2], aPhysY[2], aLogX[2], aLogY[2];
 
-/* Temperature variable */
-float temp;
-
 /* Global variables ---------------------------------------------------------*/
 TS_StateTypeDef TS_State = { 0 };
 
@@ -108,7 +126,7 @@ ADC_HandleTypeDef AdcHandle;
 GPIO_InitTypeDef GPIO_InitStruct;
 
 /* buffer used while converting the integer to string for displaying filtered Input Voltage */
-char buff[10];
+char buff[8];
 
 /* store corrected value for Input Voltage */
 float volts = 0;
@@ -119,6 +137,13 @@ int volts_array_position = 0;
 float *graph;
 int graph_display_offset = 220;
 int graph_y_axis_offset = 10;
+
+UART_HandleTypeDef UartHandle;
+/* Buffer used for transmission */
+uint8_t aTxBuffer[] = "01234567";
+
+/* Buffer used for reception */
+uint8_t aRxBuffer[RXBUFFERSIZE];
 
 /* Private function prototypes -----------------------------------------------*/
 static void SystemClock_Config(void);
@@ -133,8 +158,6 @@ float map(uint16_t volt);
 uint8_t volts_to_string(float volts, char* s);
 float average(float *volts_array);
 void TS_Init(void);
-
-int temperature = 0;
 
 uint8_t Touchscreen_Calibration(void);
 uint8_t CheckForUserInput(void);
@@ -475,38 +498,12 @@ void shift_graph_values() {
 		graph[i] = graph[i - 1];
 	}
 }
-int a = 0;
 
 void draw_graph() {
 	BSP_LCD_SetTextColor(LCD_COLOR_RED);
 
-////	BSP_LCD_Clear(LCD_COLOR_WHITE);
-//	a = BSP_LCD_GetYSize();
-//	BSP_LCD_ClearStringLine(0);
-//	BSP_LCD_ClearStringLine(1);
-//	BSP_LCD_ClearStringLine(2);
-//	BSP_LCD_ClearStringLine(3);
-//	BSP_LCD_ClearStringLine(4);
-////	BSP_LCD_ClearStringLine(5);
-//	BSP_LCD_ClearStringLine(6);
-//	BSP_LCD_ClearStringLine(7);
-//	BSP_LCD_ClearStringLine(8);
-//	BSP_LCD_ClearStringLine(9);
-//	BSP_LCD_ClearStringLine(10);
-//	BSP_LCD_ClearStringLine(11);
-////	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize());
-
 	int i;
 	for (i = 0; i < BSP_LCD_GetXSize(); i++) {
-
-//		int x_1 = i+10;
-//		int y_1 = BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset;
-//
-//		int x_2 = i+1 +10;
-//		int y_2 = BSP_LCD_GetYSize() - graph[i+1] * 10 + graph_display_offset;
-//
-//		BSP_LCD_DrawLine(x_1, y_1, x_2 +1, y_2);
-
 		BSP_LCD_DrawLine(i +10, BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset,i + 1 +10,BSP_LCD_GetYSize() - graph[i + 1] * 10 + graph_display_offset);
 		BSP_LCD_DrawLine(i +10, BSP_LCD_GetYSize() - graph[i] * 10 + graph_display_offset +1, i + 1 +10, BSP_LCD_GetYSize() - graph[i + 1] * 10 + graph_display_offset +1);
 	}
@@ -515,10 +512,8 @@ void draw_graph() {
 	BSP_LCD_SetTextColor(LCD_COLOR_DARKGRAY);
 
 	BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() + graph_display_offset, BSP_LCD_GetXSize());
-	BSP_LCD_DrawVLine(graph_y_axis_offset, 100, 120);
+	BSP_LCD_DrawVLine(graph_y_axis_offset, 140, 80);
 
-	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -96, (uint8_t *) "9", LEFT_MODE);
-	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -75, (uint8_t *) "7", LEFT_MODE);
 	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -54, (uint8_t *) "5", LEFT_MODE);
 	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -35, (uint8_t *) "3", LEFT_MODE);
 	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -16, (uint8_t *) "1", LEFT_MODE);
@@ -530,12 +525,7 @@ void display_volts() {
 	BSP_LCD_SetFont(&Font24);
 	BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
 
-//	BSP_LCD_ClearStringLine(4);
-//	BSP_LCD_ClearStringLine(5);
-//	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize());
-
-//	BSP_LCD_ClearStringLine(BSP_LCD_GetYSize() - 130);
-	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 200, (uint8_t *) buff,CENTER_MODE);
+	BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 130, (uint8_t *) buff,CENTER_MODE);
 }
 
 // temp sensor start here
@@ -571,36 +561,85 @@ uint8_t read_data() {
 	return data;
 }
 
+void UART_Config(){
+//	BSP_LED_Toggle(LED5);
+//	BSP_LED_Toggle(LED6);
+
+	 UartHandle.Instance        = USARTx;
+
+	  UartHandle.Init.BaudRate     = 9600;
+	  UartHandle.Init.WordLength   = UART_WORDLENGTH_8B;
+	  UartHandle.Init.StopBits     = UART_STOPBITS_1;
+	  UartHandle.Init.Parity       = UART_PARITY_NONE;
+	  UartHandle.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+	  UartHandle.Init.Mode         = UART_MODE_TX_RX;
+	  UartHandle.Init.OverSampling = UART_OVERSAMPLING_16;
+	  UartHandle.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+	  if(HAL_UART_DeInit(&UartHandle) != HAL_OK)
+	  {
+	    Error_Handler();
+	  }
+	  if(HAL_UART_Init(&UartHandle) != HAL_OK)
+	  {
+	    Error_Handler();
+	  }
+
+//	  if(HAL_UART_Receive(&UartHandle, (uint8_t *)aRxBuffer, RXBUFFERSIZE, 0x1FFFFFF) != HAL_OK)
+//	    {
+//	      Error_Handler();
+//	    }
+//
+//	    /* Turn LED6 on: Transfer in reception process is correct */
+////	    BSP_LED_On(LED6);
+////	    BSP_LED_On(LED5);
+//	    BSP_LED_Toggle(LED5);
+//	    BSP_LED_Toggle(LED6);
+}
+
 void KY015(uint8_t dat[]) {
 	for (int i = 0; i < 4; i++){ // receive temperature and humidity data, the parity bit is not considered
 		dat[i] = read_data(); //dat[0].dat[1] =>humidity dat[2].dat[3] =>temperature
 	}
 }
 
-int map_temperature(uint16_t input){
-	double temp = log(10000.0 * ((1024.0/input -1)));
-	temp = 1 / (0.001129148 + (0.000234125 + (0.0000000876741 * temp * temp)) * temp);
-	temp = temp - 273 * 15;
-	temp -= 20;
-
-	return (int) temp;
+/**
+  * @brief EXTI line detection callbacks
+  * @param GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == WAKEUP_BUTTON_PIN)
+  {
+//    UserButtonStatus = 1;
+  }
 }
 
+/**
+  * @brief  UART error callbacks
+  * @param  UartHandle: UART handle
+  * @note   This example shows a simple way to report transfer error, and you can
+  *         add your own implementation.
+  * @retval None
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *UartHandle)
+{
+    Error_Handler();
+}
+
+
 void display_temp(){
-	BSP_LCD_SetFont(&Font20);
-	BSP_LCD_SetTextColor(LCD_COLOR_DARKMAGENTA);
+	BSP_LCD_SetFont(&Font16);
+	BSP_LCD_SetTextColor(LCD_COLOR_DARKGREEN);
 
-	char temp[16];
+	 if(HAL_UART_Receive(&UartHandle, (uint8_t *)aRxBuffer, RXBUFFERSIZE, 0x1FFFFFF) != HAL_OK)
+		    {
+		      Error_Handler();
+		    }
 
-//	itoa(map_temperature(uhADCxConvertedValue), temp, 16);
-
-	float mapped = map_temperature(uhADCxConvertedValue);
-	volts_to_string(mapped, temp);
-
-
-	BSP_LCD_DisplayStringAt(0,0, (uint8_t *) temp, LEFT_MODE);
-
-//	BSP_LCD_DisplayStringAt(1, BSP_LCD_GetYSize() + graph_display_offset -54, (uint8_t *) "5", LEFT_MODE);
+//	 BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 150, (uint8_t *) aRxBuffer,CENTER_MODE);
+	 BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 220, (uint8_t *) aRxBuffer, LEFT_MODE);
 }
 
 // temp sensor end here
@@ -644,6 +683,8 @@ int main(void) {
 
 	DMA_ADC_Config();
 
+	UART_Config();
+
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
 	BSP_LCD_SetFont(&Font24);
 	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
@@ -661,10 +702,16 @@ int main(void) {
 			BSP_LED_Toggle(LED6);
 		}
 
+		shift_graph_values();
+		graph[0] = volts_array[volts_array_position];
+
 		volts_array[volts_array_position] = map(uhADCxConvertedValue);
 		volts_array_position++;
 
 		if (volts_array_position == AVG_ON_PAST) {
+			BSP_LCD_Clear(LCD_COLOR_WHITE);
+			draw_graph();
+
 			volts_array_position = 0;
 
 			volts_previous = volts;
@@ -672,26 +719,15 @@ int main(void) {
 			volts = average(volts_array);
 			volts_to_string(volts, buff);
 
-			shift_graph_values();
-			graph[0] = volts;
-
-			BSP_LCD_Clear(LCD_COLOR_WHITE);
-
-//			int i;
-//			for(i=0; i<BSP_LCD_GetXSize(); i += 10){
-//				BSP_LCD_ClearStringLine(i);
-//			}
-
-			display_volts();
-			draw_graph();
-			display_temp();
-
-//			if (volts_previous >= 10 && volts < 10) {
-//				BSP_LCD_Clear(LCD_COLOR_WHITE);
-//			}
+			if (volts_previous >= 10 && volts < 10) {
+				BSP_LCD_Clear(LCD_COLOR_WHITE);
+			}
 		}
 
-		HAL_Delay(100);
+		display_volts();
+
+		display_temp();
+//		HAL_Delay(100);
 	}
 }
 

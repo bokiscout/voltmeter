@@ -1,11 +1,11 @@
 /**
   ******************************************************************************
-  * @file    Templates/stm32f7xx_it.c 
+  * @file    Templates/stm32f7xx_it.c
   * @author  MCD Application Team
   * @version V1.0.0
-  * @date    30-December-2016 
+  * @date    30-December-2016
   * @brief   Main Interrupt Service Routines.
-  *          This file provides template for all exceptions handler and 
+  *          This file provides template for all exceptions handler and
   *          peripherals interrupt service routine.
   ******************************************************************************
   * @attention
@@ -167,7 +167,7 @@ void SysTick_Handler(void)
 //// start here
 //void ADC_IRQHandler(void)
 //{
-//  HAL_ADC_IRQHandler(&AdcHandle);
+//	HAL_ADC_IRQHandler(&AdcHandle);
 //}
 
 // end here
@@ -182,6 +182,11 @@ void ADCx_DMA_IRQHandler(void)
 //{
 //   HAL_GPIO_EXTI_IRQHandler(TS_INT_PIN);
 //}
+
+void EXTI0_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(WAKEUP_BUTTON_PIN);
+}
 
 /******************************************************************************/
 /*                 STM32F7xx Peripherals Interrupt Handlers                   */
@@ -202,7 +207,7 @@ void ADCx_DMA_IRQHandler(void)
 
 /**
   * @}
-  */ 
+  */
 
 /**
   * @}
